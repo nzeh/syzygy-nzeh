@@ -144,5 +144,21 @@
         '<(src)/syzygy/minidump/minidump.gyp:minidump_lib',
       ],
     },
+    {
+      'target_name': 'refinery_prob_mem_analyzer',
+      'type': 'executable',
+      'sources': [
+        'prob_mem_analyzer/run_prob_mem_analyzer.cc',
+      ],
+      'dependencies': [
+        'analyzers/analyzers.gyp:analyzers_lib',
+        'core/core.gyp:refinery_core_lib',
+        'process_state/process_state.gyp:process_state_lib',
+        'types/types.gyp:types_lib',
+        'validators/validators.gyp:validators_lib',
+        '<(src)/base/base.gyp:base',
+        '<(src)/syzygy/minidump/minidump.gyp:minidump_lib',
+      ],
+    },
   ]
 }
