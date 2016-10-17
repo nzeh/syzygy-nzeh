@@ -148,6 +148,10 @@
       'target_name': 'refinery_prob_mem_analyzer',
       'type': 'executable',
       'sources': [
+	'prob_mem_analyzer/factor_graph.cc',
+	'prob_mem_analyzer/factor_graph_builder.cc',
+	'prob_mem_analyzer/factor_graph_inference.cc',
+	'prob_mem_analyzer/prob_mem_analyzer.cc',
         'prob_mem_analyzer/run_prob_mem_analyzer.cc',
       ],
       'dependencies': [

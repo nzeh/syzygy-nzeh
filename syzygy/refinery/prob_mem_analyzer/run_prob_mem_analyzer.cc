@@ -23,12 +23,31 @@
 #include <iostream>
 #include "syzygy/refinery/process_state/process_state.h"
 
+struct A {
+    int x;
+};
+
+struct B {
+};
+
+struct C : public A, public B {
+    int z;
+};
+
 using std::cout;
 using std::endl;
 
 using namespace refinery;
 
 int main(int argc, char** argv) {
-	ProcessState state;
-	cout << state.LayerName(ProcessState::HeapAllocationLayer) << endl;
+    C c;
+    A *a = &c;
+    B *b = &c;
+
+    std::cout << "@C: " << &c << std::endl;
+    std::cout << "@A: " << a << std::endl;
+    std::cout << "@B: " << b << std::endl;
+    std::cout << "@C.x: " << &c.x << std::endl;
+    std::cout << "@C.z: " << &c.z << std::endl;
+    std::cout << "@A.x: " << &a->x << std::endl;
 }
