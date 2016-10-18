@@ -7,6 +7,8 @@
 namespace refinery {
     namespace ProbMemAnalysis {
 
+        // A hash function and equality operator for hypothesis pointers, needed to store them
+        // in a hash table of hypotheses already in the graph.
         class HypothesisHash {
 
         public:
@@ -26,6 +28,8 @@ namespace refinery {
                 const FactorGraph::HypothesisPtr &, const FactorGraph::HypothesisPtr &) const;
         };
 
+        // A hash function and equality operator for factor pointers, needed to store them in
+        // a hash table of factors already in the graph.
         class FactorHash {
 
         public:
@@ -41,22 +45,30 @@ namespace refinery {
             bool operator()(const FactorGraph::FactorPtr &, const FactorGraph::FactorPtr &) const;
         };
 
+        // Helper class for building a FactorGraph.  Makes sure every hypothesis an factor is
+        // added only once.
         class FactorGraphBuilder {
 
         public:
+            // Initialize the builder with an empty graph.
             void initialize();
 
+            // Functions to add hypotheses and factors to the graph.  They return true if the
+            // addition actually took place, that is, the hypothesis or factor didn't already
+            // exist.
             bool addHypothesis(FactorGraph::HypothesisPtr *);
             bool addFactor(FactorGraph::FactorPtr *, const FactorGraph::VertexPtrs &);
 
+            // Get the constructed graph.
             FactorGraphPtr getGraph();
 
+        private:
             using HypothesisCatalogue =
                 std::unordered_set<FactorGraph::HypothesisPtr, HypothesisHash, HypothesisEqual>;
+
             using FactorCatalogue =
                 std::unordered_set<FactorGraph::FactorPtr, FactorHash, FactorEqual>;
 
-        private:
             FactorGraphPtr      _graph;
             HypothesisCatalogue _hypotheses;
             FactorCatalogue     _factors;

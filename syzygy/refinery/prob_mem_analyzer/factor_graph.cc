@@ -30,8 +30,8 @@ namespace refinery {
 
         FactorGraph::Edge::Edge(Vertex *x, Vertex *y)
             : _endpoints({ x, y }),
-            _out_messages({ { {0.5, 0.5}, {0.5, 0.5} } }),
-            _in_messages({ { {0.5, 0.5}, {0.5, 0.5} } }) {}
+            _out_messages({ {{0.5, 0.5}, {0.5, 0.5}} }),
+            _in_messages({ {{0.5, 0.5}, {0.5, 0.5}} }) {}
 
         void FactorGraph::Edge::sendMessage(Vertex *source, const Message &message) {
             _in_messages[source == _endpoints[0] ? 0 : 1] = message;
@@ -81,14 +81,6 @@ namespace refinery {
             return nullptr;
         }
 
-        FactorGraph::Observation *FactorGraph::Hypothesis::castToObservation() {
-            return nullptr;
-        }
-
-        const FactorGraph::Observation *FactorGraph::Hypothesis::castToObservation() const {
-            return nullptr;
-        }
-
         FactorGraph::Hypothesis::Kind FactorGraph::Hypothesis::kind() const {
             return _kind;
         }
@@ -102,6 +94,9 @@ namespace refinery {
                         prod[0] *= msg[0];
                         prod[1] *= msg[1];
                     }
+                // We normalize messages so they don't drift off to 0 or infinity.  Logically,
+                // this should not make a difference, but numerically and as far as convergence
+                // is concerned, it may.
                 auto total = prod[0] + prod[1];
                 prod[0] /= total;
                 prod[1] /= total;
@@ -120,10 +115,17 @@ namespace refinery {
         }
 
         bool FactorGraph::Hypothesis::operator==(const FactorGraph::Hypothesis &other) {
+
+            // Hypotheses of different kinds are not equal
             if (_kind != other._kind)
                 return false;
+
+            // Observations (facts) are equal only if they are the same observation
             if (_kind == Kind::Observation)
                 return (this == &other);
+
+            // Type hypotheses of the same kind are equal if they refer to the same address range
+            // and type
             auto type_hypothesis = castToTypeHypothesis();
             auto other_type_hypothesis = other.castToTypeHypothesis();
             return (
@@ -150,35 +152,24 @@ namespace refinery {
             return this;
         }
 
-        FactorGraph::DeclaredTypeHypothesis::DeclaredTypeHypothesis(
-            const AddressRange &range, TypeId type)
-            : TypeHypothesis(Kind::DeclaredTypeHypothesis, range, type) {}
+        FactorGraph::Factor::Factor(Kind kind, Weights &&weights)
+            : _kind(kind), _weights(std::move(weights)) {}
 
-        FactorGraph::ContentTypeHypothesis::ContentTypeHypothesis(
-            const AddressRange &range, TypeId type)
-            : TypeHypothesis(Kind::ContentTypeHypothesis, range, type) {}
-
-        FactorGraph::Observation *FactorGraph::Observation::castToObservation() {
-            return this;
-        }
-
-        const FactorGraph::Observation *FactorGraph::Observation::castToObservation() const {
-            return this;
-        }
-
-        FactorGraph::Factor::Factor(Weights &&weights, Kind kind)
-            : _weights(std::move(weights)), _kind(kind) {}
-
-        FactorGraph::Factor::Factor(const Weights &weights, Kind kind)
-            : _weights(weights), _kind(kind) {}
+        FactorGraph::Factor::Factor(Kind kind, const Weights &weights)
+            : _kind(kind), _weights(weights) {}
 
         FactorGraph::Factor::Kind FactorGraph::Factor::kind() const {
             return _kind;
         }
 
         bool FactorGraph::Factor::operator==(const Factor &other) {
+
+            // Factors of different kinds are different
             if (_kind != other._kind)
                 return false;
+
+            // Factors of the same kind are the same if they have exactly the same set of
+            // neighbours.
             for (auto x = neighbours().begin(), y = other.neighbours().begin(),
                 xend = neighbours().end(), yend = other.neighbours().end();
                 x != xend || y != yend; ++x, ++y) {
@@ -191,17 +182,34 @@ namespace refinery {
         }
 
         FactorGraph::Edge::Message FactorGraph::Factor::summarizeMessages(unsigned int index) {
-            auto this_bit   = 1U << index;
+
+            // The index'th bit, the bits at position index and above, and the bits below position
+            // index
+            auto this_bit = 1U << index;
             auto upper_bits = std::numeric_limits<unsigned int>::max() << index;
             auto lower_bits = std::numeric_limits<unsigned int>::max() - upper_bits;
+
             Edge::Message msg;
             for (auto i = 0; i < 2; ++i) {
+
+                // The value to be expected in the index'th bit position of the weight index for
+                // this weight to be taken into account for message msg[i]
                 auto this_bit_value = i * this_bit;
+
                 msg[i] = 0;
+
+                // msg[i] is a sum of _weights.size() / 2 weight-message products.
                 for (auto j = 0U, count = _weights.size() / 2; j < count; ++j) {
+
+                    // The index of the jth weight is obtained by shifting up the upper bits of
+                    // j and splicing in this_bit_value between the upper and lower bits.
                     auto k = (j & upper_bits << 1) + this_bit_value + (j & lower_bits);
+
+                    // Now multiply the kth weight with the messages corresponding to the values
+                    // of its bits.
                     auto point_weight = _weights[k];
-                    for (auto not_i = 0U, bit = 1U, degree = neighbours().size(); not_i < degree; ++not_i, bit <<= 1)
+                    for (auto not_i = 0U, bit = 1U, degree = neighbours().size();
+                        not_i < degree; ++not_i, bit <<= 1)
                         if (not_i != index) {
                             auto val = (k & bit ? 1 : 0);
                             point_weight *= neighbours()[not_i]->receiveMessage(this)[val];
@@ -218,29 +226,5 @@ namespace refinery {
         }
 
         void FactorGraph::Factor::computeProbability() {}
-
-        FactorGraph::DecompositionFactor::DecompositionFactor(Weights &&weights)
-            : Factor(std::move(weights), Kind::DecompositionFactor) {}
-
-        FactorGraph::DecompositionFactor::DecompositionFactor(const Weights &weights)
-            : Factor(weights, Kind::DecompositionFactor) {}
-
-        FactorGraph::PointerFactor::PointerFactor(Weights &&weights)
-            : Factor(std::move(weights), Kind::PointerFactor) {}
-
-        FactorGraph::PointerFactor::PointerFactor(const Weights &weights)
-            : Factor(weights, Kind::PointerFactor) {}
-
-        FactorGraph::ContentFactor::ContentFactor(Weights &&weights)
-            : Factor(std::move(weights), Kind::ContentFactor) {}
-
-        FactorGraph::ContentFactor::ContentFactor(const Weights &weights)
-            : Factor(weights, Kind::ContentFactor) {}
-
-        FactorGraph::DeclarationContentFactor::DeclarationContentFactor(Weights &&weights)
-            : Factor(std::move(weights), Kind::ContentFactor) {}
-
-        FactorGraph::DeclarationContentFactor::DeclarationContentFactor(const Weights &weights)
-            : Factor(weights, Kind::ContentFactor) {}
     }
 }

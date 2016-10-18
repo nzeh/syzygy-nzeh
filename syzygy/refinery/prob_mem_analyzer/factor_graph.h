@@ -6,10 +6,6 @@
 #include <syzygy/refinery/core/address.h>
 #include <syzygy/refinery/types/type.h>
 
-// Everything "MarkovNetwork" in here should be renamed to "FactorGraph" because that's how we
-// represent things.  I only started thinking about it as a Markov network (or rather
-// Markov random field) when I started on this.
-
 #define DECLARE_CLASS(T)                  \
     class T;                              \
     using T##Ptr   = std::shared_ptr<T>;  \
@@ -21,7 +17,7 @@ namespace refinery {
 
         // The factor graph used for inferring probabilities of address-type annotations
         DECLARE_CLASS(FactorGraph)
-        
+
         class FactorGraph {
 
         public:
@@ -31,14 +27,7 @@ namespace refinery {
             DECLARE_CLASS(Edge)
             DECLARE_CLASS(Hypothesis)
             DECLARE_CLASS(TypeHypothesis)
-            DECLARE_CLASS(DeclaredTypeHypothesis)
-            DECLARE_CLASS(ContentTypeHypothesis)
-            DECLARE_CLASS(Observation)
             DECLARE_CLASS(Factor)
-            DECLARE_CLASS(DecompositionFactor)
-            DECLARE_CLASS(PointerFactor)
-            DECLARE_CLASS(ContentFactor)
-            DECLARE_CLASS(DeclarationContentFactor)
 
             void addVertex(const VertexPtr &);
             void addEdge(const EdgePtr &);
@@ -53,19 +42,25 @@ namespace refinery {
             DISALLOW_COPY_AND_ASSIGN(FactorGraph);
         };
 
-        // A vertex of the factor graph.  All vertices know about is their neighbours.
         class FactorGraph::Vertex {
 
         public:
+            Vertex() = default;
             virtual ~Vertex() = default;
 
             const EdgeCPtrs &neighbours() const;
 
-            virtual void sendMessages() = 0;
-            virtual void computeProbability() = 0;
+            // These two methods are the key workers in the implementation of belief propagation.
+            // Note: Other inference methods are possible and may be explored, but belief
+            // propagation is so simple to implement that it's a good candidate to try first.
 
-        protected:
-            Vertex() = default;
+            // Calculate message sent to each neighbour from the messages received from all other
+            // neighbours.
+            virtual void sendMessages() = 0;
+
+            // Compute the probability of this vertex from the messages received from its
+            // neighbours.
+            virtual void computeProbability() = 0;
 
         private:
             friend class FactorGraph::Edge;
@@ -82,52 +77,74 @@ namespace refinery {
         public:
             Edge(Vertex *, Vertex *);
 
+            // A message consists of a pair of weights whose relative values represent how strongly
+            // the sender believes that the recipient should be true or false.
             using Message = std::array<double, 2>;
 
+            // Send the given message from the given endpoint.
             void sendMessage(Vertex *, const Message &);
+
+            // Receive the given message by the given endpoint.
             const Message &receiveMessage(Vertex *);
+
+            // The current belief propagation implementation proceeds in synchronized rounds.
+            // This requires each edge to distinguish between messages received from one endpoint
+            // before the current round (_out_messages) and messages received during the current
+            // round (_in_messages).  This method is called at the end of the current round to 
+            // copy _in_messages to _out_messages in preparation for the next round.  It returns
+            // true if the relative difference between the old _in_messages and the old
+            // _out_messages is less than 1% (at which point we consider the belief propagation
+            // to have converged).
             bool propagateMessages();
+
+            // Resets messages to equal probability for true and false at the beginning of
+            // belief propagation.
             void resetMessages();
 
+            // Given one endpoint of the edge, returns the other endpoint.
             Vertex *otherEndpoint(const Vertex *) const;
 
         private:
             friend class FactorGraph;
+
+            // Adds this edge to the neighbour lists of its two endpoints.
             void connectToEndpoints();
 
+            // Two endpoints, two in-messages, two out-messages
             std::array<Vertex *, 2> _endpoints;
             std::array<Message, 2> _in_messages;
             std::array<Message, 2> _out_messages;
         };
 
-        // A vertex that represents some hypothesis or fact (Observation is a subclass
-        // of Hypothesis and is guaranteed to be true with confidence 1 based on the structure
-        // of the graph).  A hypothesis has an associated probability.
+        // A vertex that represents some hypothesis or fact.  (Facts are represented as hypotheses
+        // whose incident factors have weights that ensure their probability is always 1.)
         class FactorGraph::Hypothesis : public FactorGraph::Vertex {
 
         public:
-            double probability() const;
-
-            virtual TypeHypothesis *castToTypeHypothesis();
-            virtual const TypeHypothesis *castToTypeHypothesis() const;
-            virtual Observation *castToObservation();
-            virtual const Observation *castToObservation() const;
-
-            enum class Kind {
+            enum Kind {
                 Observation,
                 DeclaredTypeHypothesis,
                 ContentTypeHypothesis,
             };
 
+            Hypothesis(Kind);
+
+            // The probability of this hypothesis
+            double probability() const;
+
+            // Safe cast of this hypothesis to a type hypothesis
+            virtual TypeHypothesis *castToTypeHypothesis();
+            virtual const TypeHypothesis *castToTypeHypothesis() const;
+
+            // The kind of this hypothesis
             Kind kind() const;
 
+            // Two hypotheses are equal if they are of the same kind and (in case of a type
+            // hypothesis) they concern the same address range and type.
             bool operator==(const Hypothesis &);
 
-            void sendMessages();
-            void computeProbability();
-
-        protected:
-            Hypothesis(Kind);
+            void sendMessages() override;
+            void computeProbability() override;
 
         private:
             double _probability;
@@ -137,18 +154,19 @@ namespace refinery {
         };
 
         // A hypothesis that represents any type of association of a type with an address
-        // range.
+        // range.  Currently, we distinguish between the type of the content (Can it be
+        // interpreted as a value of this type?) and the type derived via type propagation
+        // and pointer chasing (the "declared" type) without inspecting the content.
         class FactorGraph::TypeHypothesis : public FactorGraph::Hypothesis {
 
         public:
+            TypeHypothesis(Kind, const AddressRange &, TypeId);
+
             const AddressRange &addressRange() const;
             TypeId type() const;
 
             FactorGraph::TypeHypothesis *castToTypeHypothesis();
             const FactorGraph::TypeHypothesis *castToTypeHypothesis() const;
-
-        protected:
-            TypeHypothesis(Kind, const AddressRange &, TypeId);
 
         private:
             AddressRange _address_range;
@@ -157,57 +175,12 @@ namespace refinery {
             DISALLOW_COPY_AND_ASSIGN(TypeHypothesis);
         };
 
-        // A hypothesis that represents that some part of the program thinks that a certain
-        // address range holds an object of a certain type
-        class FactorGraph::DeclaredTypeHypothesis : public FactorGraph::TypeHypothesis {
-
-        public:
-            DeclaredTypeHypothesis(const AddressRange &, TypeId);
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(DeclaredTypeHypothesis);
-        };
-
-        // A hypothesis that represents that the content of a certain address range contains
-        // a (possibly corrupted) representation of an object of a certain type
-        class FactorGraph::ContentTypeHypothesis : public FactorGraph::TypeHypothesis {
-
-        public:
-            ContentTypeHypothesis(const AddressRange &, TypeId);
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(ContentTypeHypothesis);
-        };
-
-        // A "hypothesis" that represents a fact.  It doesn't store any useful information
-        // about the fact it represents but instead is used as an anchor linked to other hypotheses
-        // using a factor whose weights ensure that its probability is always 1.  For example,
-        // we represent the observed memory content of a certain address range as an Observation
-        // and link it to a ContentTypeHypothesis with a factor whose weights express the degree
-        // to which we believe that this address range is indeed of this type given the bit data
-        // we found in this address range.
-        class FactorGraph::Observation : public FactorGraph::Hypothesis {
-
-        public:
-            Observation() = default;
-
-            FactorGraph::Observation *castToObservation();
-            const FactorGraph::Observation *castToObservation() const;
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(Observation);
-        };
-
         // A vertex that represents a factor, that is, a representation of a joint probability
         // distribution over a set of hypotheses.
-        //
-        // TODO(nzeh): Add methods that allow us to manipulate the probability distribution
-        // associated with this factor during inference.
         class FactorGraph::Factor : public FactorGraph::Vertex {
 
         public:
-
-            enum class Kind {
+            enum Kind {
                 DecompositionFactor,
                 PointerFactor,
                 ContentFactor,
@@ -216,15 +189,21 @@ namespace refinery {
 
             using Weights = std::vector<double>;
 
-            Factor(Weights &&, Kind);
-            Factor(const Weights &, Kind);
+            Factor(Kind, Weights &&);
+            Factor(Kind, const Weights &);
 
             Kind kind() const;
 
             bool operator==(const Factor &);
 
+            // Computes a summary message to be sent to the ith neighbour from the messages
+            // received from all neighbours except the ith.
             Edge::Message summarizeMessages(unsigned int);
+
+            // Send messages to all neighbours based on the messages received from them.
             void sendMessages();
+
+            // For a factor, this does nothing.
             void computeProbability();
 
         private:
@@ -232,54 +211,6 @@ namespace refinery {
             Kind    _kind;
 
             DISALLOW_COPY_AND_ASSIGN(Factor);
-        };
-
-        // A factor representing the association between hypotheses generated by decomposing
-        // UDTs and arrays into their members.
-        class FactorGraph::DecompositionFactor : public FactorGraph::Factor {
-
-        public:
-            DecompositionFactor(Weights &&);
-            DecompositionFactor(const Weights &);
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(DecompositionFactor);
-        };
-
-        // A factor representing the association between hypotheses generated by dereferencing
-        // pointers.
-        class FactorGraph::PointerFactor : public FactorGraph::Factor {
-
-        public:
-            PointerFactor(Weights &&);
-            PointerFactor(const Weights &);
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(PointerFactor);
-        };
-
-        // A factor representing the association between hypotheses generated by analyzing the
-        // content of a given address range.
-        class FactorGraph::ContentFactor : public FactorGraph::Factor {
-
-        public:
-            ContentFactor(Weights &&);
-            ContentFactor(const Weights &);
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(ContentFactor);
-        };
-
-        // A factor used to link a DeclaredTypeHypothesis and a ContentTypeHypothesis for the
-        // same type and address range.
-        class FactorGraph::DeclarationContentFactor : public FactorGraph::Factor {
-
-        public:
-            DeclarationContentFactor(Weights &&);
-            DeclarationContentFactor(const Weights &);
-
-        private:
-            DISALLOW_COPY_AND_ASSIGN(DeclarationContentFactor);
         };
     }
 }

@@ -31,7 +31,8 @@ namespace refinery {
                         auto elem_hypothesis_pair = destructureBlockIfNew(builder, elem);
                         if (array_hypothesis_pair.declared_type && elem_hypothesis_pair.declared_type) {
                             FactorGraph::FactorPtr declared_type_factor =
-                                std::make_shared<FactorGraph::DecompositionFactor>(
+                                std::make_shared<FactorGraph::Factor>(
+                                    FactorGraph::Factor::DecompositionFactor,
                                     FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
                             builder.addFactor(&declared_type_factor, {
                                 array_hypothesis_pair.declared_type,
@@ -40,7 +41,8 @@ namespace refinery {
                         }
                         if (array_hypothesis_pair.content_type && elem_hypothesis_pair.content_type) {
                             FactorGraph::FactorPtr content_type_factor =
-                                std::make_shared<FactorGraph::DecompositionFactor>(
+                                std::make_shared<FactorGraph::Factor>(
+                                    FactorGraph::Factor::DecompositionFactor,
                                     FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
                             builder.addFactor(&content_type_factor, {
                                 array_hypothesis_pair.content_type,
@@ -77,7 +79,8 @@ namespace refinery {
                             auto field_hypothesis_pair = destructureBlockIfNew(builder, field_data);
                             if (udt_hypothesis_pair.declared_type && field_hypothesis_pair.declared_type) {
                                 FactorGraph::FactorPtr declared_type_factor =
-                                    std::make_shared<FactorGraph::DecompositionFactor>(
+                                    std::make_shared<FactorGraph::Factor>(
+                                        FactorGraph::Factor::DecompositionFactor,
                                         FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
                                 builder.addFactor(&declared_type_factor, {
                                     udt_hypothesis_pair.declared_type,
@@ -86,7 +89,8 @@ namespace refinery {
                             }
                             if (udt_hypothesis_pair.content_type && field_hypothesis_pair.content_type) {
                                 FactorGraph::FactorPtr content_type_factor =
-                                    std::make_shared<FactorGraph::DecompositionFactor>(
+                                    std::make_shared<FactorGraph::Factor>(
+                                        FactorGraph::Factor::DecompositionFactor,
                                         FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
                                 builder.addFactor(&content_type_factor, {
                                     udt_hypothesis_pair.content_type,
@@ -117,7 +121,8 @@ namespace refinery {
             if (data.Dereference(&referenced_data)) {
                 auto target_hypothesis_pair = destructureBlockIfNew(builder, referenced_data);
                 FactorGraph::FactorPtr pointer_factor =
-                    std::make_shared<FactorGraph::PointerFactor>(
+                    std::make_shared<FactorGraph::Factor>(
+                        FactorGraph::Factor::PointerFactor,
                         FactorGraph::Factor::Weights({ 0, 0, 0, 0, 0, 0, 0, 0 }));
                 builder.addFactor(&pointer_factor, {
                     ptr_hypothesis_pair.declared_type,
@@ -140,15 +145,18 @@ namespace refinery {
             TypeHypothesisPair hypothesis_pair;
 
             hypothesis_pair.declared_type =
-                std::make_shared<FactorGraph::DeclaredTypeHypothesis>(range, type);
+                std::make_shared<FactorGraph::TypeHypothesis>(
+                    FactorGraph::Hypothesis::DeclaredTypeHypothesis, range, type);
             if (builder.addHypothesis(&hypothesis_pair.declared_type)) {
                 if (data.bit_source()->GetFrom(range, &available_bytes, nullptr) &&
                     available_bytes == range.size()) {
                     hypothesis_pair.content_type =
-                        std::make_shared<FactorGraph::ContentTypeHypothesis>(range, type);
+                        std::make_shared<FactorGraph::TypeHypothesis>(
+                            FactorGraph::Hypothesis::ContentTypeHypothesis, range, type);
                     builder.addHypothesis(&hypothesis_pair.content_type);
                     FactorGraph::FactorPtr link_hypotheses =
-                        std::make_shared<FactorGraph::DeclarationContentFactor>(
+                        std::make_shared<FactorGraph::Factor>(
+                            FactorGraph::Factor::DeclarationContentFactor,
                             FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
                     builder.addFactor(&link_hypotheses, {
                         hypothesis_pair.declared_type,
