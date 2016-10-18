@@ -1,7 +1,7 @@
 #ifndef SYZYGY_REFINERY_PROB_MEMORY_ANALYZER_FACTOR_GRAPH_H_
 #define SYZYGY_REFINERY_PROB_MEMORY_ANALYZER_FACTOR_GRAPH_H_
 
-#include <memory>
+#include <array>
 #include "base/macros.h"
 #include <syzygy/refinery/core/address.h>
 #include <syzygy/refinery/types/type.h>
@@ -10,52 +10,48 @@
 // represent things.  I only started thinking about it as a Markov network (or rather
 // Markov random field) when I started on this.
 
+#define DECLARE_CLASS(T)                  \
+    class T;                              \
+    using T##Ptr   = std::shared_ptr<T>;  \
+    using T##Ptrs  = std::vector<T##Ptr>; \
+    using T##CPtrs = std::vector<T *>;
+
 namespace refinery {
     namespace ProbMemAnalysis {
 
         // The factor graph used for inferring probabilities of address-type annotations
+        DECLARE_CLASS(FactorGraph)
+        
         class FactorGraph {
 
         public:
             FactorGraph() = default;
 
-            class Vertex;
-            using VertexPtr = std::shared_ptr<Vertex>;
-            using VertexConstPtr = std::shared_ptr<const Vertex>;
-            using Vertices = std::vector<VertexPtr>;
-
-            class Hypothesis;
-            using HypothesisPtr = std::shared_ptr<Hypothesis>;
-            using HypothesisConstPtr = std::shared_ptr<const Hypothesis>;
-
-            class TypeHypothesis;
-            using TypeHypothesisPtr = std::shared_ptr<TypeHypothesis>;
-            using TypeHypothesisConstPtr = std::shared_ptr<const TypeHypothesis>;
-
-            class DeclaredTypeHypothesis;
-            class ContentTypeHypothesis;
-            
-            class Observation;
-            using ObservationPtr = std::shared_ptr<Observation>;
-            using ObservationConstPtr = std::shared_ptr<const Observation>;
-
-            class Factor;
-            using FactorPtr = std::shared_ptr<Factor>;
-
-            class DecompositionFactor;
-            class PointerFactor;
-            class ContentFactor;
-            class DeclarationContentFactor;
+            DECLARE_CLASS(Vertex)
+            DECLARE_CLASS(Edge)
+            DECLARE_CLASS(Hypothesis)
+            DECLARE_CLASS(TypeHypothesis)
+            DECLARE_CLASS(DeclaredTypeHypothesis)
+            DECLARE_CLASS(ContentTypeHypothesis)
+            DECLARE_CLASS(Observation)
+            DECLARE_CLASS(Factor)
+            DECLARE_CLASS(DecompositionFactor)
+            DECLARE_CLASS(PointerFactor)
+            DECLARE_CLASS(ContentFactor)
+            DECLARE_CLASS(DeclarationContentFactor)
 
             void addVertex(const VertexPtr &);
+            void addEdge(const EdgePtr &);
+
+            const VertexPtrs &vertices();
+            const EdgePtrs &edges();
 
         private:
-            Vertices _vertices;
+            VertexPtrs _vertices;
+            EdgePtrs   _edges;
 
             DISALLOW_COPY_AND_ASSIGN(FactorGraph);
         };
-
-        using FactorGraphPtr = std::shared_ptr<FactorGraph>;
 
         // A vertex of the factor graph.  All vertices know about is their neighbours.
         class FactorGraph::Vertex {
@@ -63,20 +59,45 @@ namespace refinery {
         public:
             virtual ~Vertex() = default;
 
-            const Vertices &neighbours() const;
+            const EdgeCPtrs &neighbours() const;
+
+            virtual void sendMessages() = 0;
+            virtual void computeProbability() = 0;
 
         protected:
             Vertex() = default;
-            explicit Vertex(Vertices &&);
-            explicit Vertex(const Vertices &);
-
-            void addNeighbour(const VertexPtr &);
 
         private:
-            friend class Factor;
-            Vertices _neighbours;
+            friend class FactorGraph::Edge;
+            void addNeighbour(Edge *);
+
+            EdgeCPtrs _neighbours;
 
             DISALLOW_COPY_AND_ASSIGN(Vertex);
+        };
+
+        // Edges between vertices in the graph.  Used to hold messages between vertices.
+        class FactorGraph::Edge {
+
+        public:
+            Edge(Vertex *, Vertex *);
+
+            using Message = std::array<double, 2>;
+
+            void sendMessage(Vertex *, const Message &);
+            const Message &receiveMessage(Vertex *);
+            bool propagateMessages();
+            void resetMessages();
+
+            Vertex *otherEndpoint(const Vertex *) const;
+
+        private:
+            friend class FactorGraph;
+            void connectToEndpoints();
+
+            std::array<Vertex *, 2> _endpoints;
+            std::array<Message, 2> _in_messages;
+            std::array<Message, 2> _out_messages;
         };
 
         // A vertex that represents some hypothesis or fact (Observation is a subclass
@@ -85,13 +106,12 @@ namespace refinery {
         class FactorGraph::Hypothesis : public FactorGraph::Vertex {
 
         public:
-            void probability(double);
             double probability() const;
 
-            virtual TypeHypothesisPtr castToTypeHypothesis();
-            virtual TypeHypothesisConstPtr castToTypeHypothesis() const;
-            virtual ObservationPtr castToObservation();
-            virtual ObservationConstPtr castToObservation() const;
+            virtual TypeHypothesis *castToTypeHypothesis();
+            virtual const TypeHypothesis *castToTypeHypothesis() const;
+            virtual Observation *castToObservation();
+            virtual const Observation *castToObservation() const;
 
             enum class Kind {
                 Observation,
@@ -102,6 +122,9 @@ namespace refinery {
             Kind kind() const;
 
             bool operator==(const Hypothesis &);
+
+            void sendMessages();
+            void computeProbability();
 
         protected:
             Hypothesis(Kind);
@@ -115,15 +138,14 @@ namespace refinery {
 
         // A hypothesis that represents any type of association of a type with an address
         // range.
-        class FactorGraph::TypeHypothesis
-            : public FactorGraph::Hypothesis, std::enable_shared_from_this<TypeHypothesis> {
+        class FactorGraph::TypeHypothesis : public FactorGraph::Hypothesis {
 
         public:
             const AddressRange &addressRange() const;
             TypeId type() const;
 
-            TypeHypothesisPtr castToTypeHypothesis();
-            TypeHypothesisConstPtr castToTypeHypothesis() const;
+            FactorGraph::TypeHypothesis *castToTypeHypothesis();
+            const FactorGraph::TypeHypothesis *castToTypeHypothesis() const;
 
         protected:
             TypeHypothesis(Kind, const AddressRange &, TypeId);
@@ -164,30 +186,16 @@ namespace refinery {
         // and link it to a ContentTypeHypothesis with a factor whose weights express the degree
         // to which we believe that this address range is indeed of this type given the bit data
         // we found in this address range.
-        class FactorGraph::Observation
-            : public FactorGraph::Hypothesis, std::enable_shared_from_this<Observation> {
+        class FactorGraph::Observation : public FactorGraph::Hypothesis {
 
         public:
             Observation() = default;
 
-            ObservationPtr castToObservation();
-            ObservationConstPtr castToObservation() const;
+            FactorGraph::Observation *castToObservation();
+            const FactorGraph::Observation *castToObservation() const;
 
         private:
             DISALLOW_COPY_AND_ASSIGN(Observation);
-        };
-
-        // A weight distribution (probability distribution without the requirement to normalize
-        // to 1) over a set of Booleans.
-        class WeightDistribution {
-
-        public:
-            explicit WeightDistribution(std::vector<double> &&);
-            explicit WeightDistribution(const std::vector<double> &);
-            double weight(const std::vector<bool> &) const;
-
-        private:
-            std::vector<double> _weights;
         };
 
         // A vertex that represents a factor, that is, a representation of a joint probability
@@ -195,8 +203,7 @@ namespace refinery {
         //
         // TODO(nzeh): Add methods that allow us to manipulate the probability distribution
         // associated with this factor during inference.
-        class FactorGraph::Factor
-            : public FactorGraph::Vertex, std::enable_shared_from_this<Factor> {
+        class FactorGraph::Factor : public FactorGraph::Vertex {
 
         public:
 
@@ -207,16 +214,22 @@ namespace refinery {
                 DeclarationContentFactor,
             };
 
-            Factor(Vertices &&, WeightDistribution &&, Kind);
-            Factor(const Vertices &, const WeightDistribution &, Kind);
+            using Weights = std::vector<double>;
+
+            Factor(Weights &&, Kind);
+            Factor(const Weights &, Kind);
 
             Kind kind() const;
 
             bool operator==(const Factor &);
 
+            Edge::Message summarizeMessages(unsigned int);
+            void sendMessages();
+            void computeProbability();
+
         private:
-            WeightDistribution _weights;
-            Kind               _kind;
+            Weights _weights;
+            Kind    _kind;
 
             DISALLOW_COPY_AND_ASSIGN(Factor);
         };
@@ -226,8 +239,8 @@ namespace refinery {
         class FactorGraph::DecompositionFactor : public FactorGraph::Factor {
 
         public:
-            DecompositionFactor(Vertices &&, WeightDistribution &&);
-            DecompositionFactor(const Vertices &, const WeightDistribution &);
+            DecompositionFactor(Weights &&);
+            DecompositionFactor(const Weights &);
 
         private:
             DISALLOW_COPY_AND_ASSIGN(DecompositionFactor);
@@ -238,8 +251,8 @@ namespace refinery {
         class FactorGraph::PointerFactor : public FactorGraph::Factor {
 
         public:
-            PointerFactor(Vertices &&, WeightDistribution &&);
-            PointerFactor(const Vertices &, const WeightDistribution &);
+            PointerFactor(Weights &&);
+            PointerFactor(const Weights &);
 
         private:
             DISALLOW_COPY_AND_ASSIGN(PointerFactor);
@@ -250,8 +263,8 @@ namespace refinery {
         class FactorGraph::ContentFactor : public FactorGraph::Factor {
 
         public:
-            ContentFactor(Vertices &&, WeightDistribution &&);
-            ContentFactor(const Vertices &, const WeightDistribution &);
+            ContentFactor(Weights &&);
+            ContentFactor(const Weights &);
 
         private:
             DISALLOW_COPY_AND_ASSIGN(ContentFactor);
@@ -262,8 +275,8 @@ namespace refinery {
         class FactorGraph::DeclarationContentFactor : public FactorGraph::Factor {
 
         public:
-            DeclarationContentFactor(Vertices &&, WeightDistribution &&);
-            DeclarationContentFactor(const Vertices &, const WeightDistribution &);
+            DeclarationContentFactor(Weights &&);
+            DeclarationContentFactor(const Weights &);
 
         private:
             DISALLOW_COPY_AND_ASSIGN(DeclarationContentFactor);

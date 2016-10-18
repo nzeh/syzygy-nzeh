@@ -47,7 +47,7 @@ namespace refinery {
             void initialize();
 
             bool addHypothesis(FactorGraph::HypothesisPtr *);
-            bool addFactor(FactorGraph::FactorPtr *);
+            bool addFactor(FactorGraph::FactorPtr *, const FactorGraph::VertexPtrs &);
 
             FactorGraphPtr getGraph();
 

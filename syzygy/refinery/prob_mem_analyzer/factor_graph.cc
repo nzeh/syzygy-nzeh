@@ -7,49 +7,116 @@ namespace refinery {
             _vertices.push_back(vertex);
         }
 
-        const FactorGraph::Vertices &FactorGraph::Vertex::neighbours() const {
+        void FactorGraph::addEdge(const EdgePtr &edge) {
+            _edges.push_back(edge);
+            edge->connectToEndpoints();
+        }
+
+        const FactorGraph::VertexPtrs &FactorGraph::vertices() {
+            return _vertices;
+        }
+
+        const FactorGraph::EdgePtrs &FactorGraph::edges() {
+            return _edges;
+        }
+
+        const FactorGraph::EdgeCPtrs &FactorGraph::Vertex::neighbours() const {
             return _neighbours;
         }
 
-        FactorGraph::Vertex::Vertex(Vertices &&neighbours)
-            : _neighbours(std::move(neighbours)) {}
+        void FactorGraph::Vertex::addNeighbour(Edge *edge) {
+            _neighbours.push_back(edge);
+        }
 
-        FactorGraph::Vertex::Vertex(const Vertices &neighbours)
-            : _neighbours(neighbours) {}
+        FactorGraph::Edge::Edge(Vertex *x, Vertex *y)
+            : _endpoints({ x, y }),
+            _out_messages({ { {0.5, 0.5}, {0.5, 0.5} } }),
+            _in_messages({ { {0.5, 0.5}, {0.5, 0.5} } }) {}
 
-        void FactorGraph::Vertex::addNeighbour(const VertexPtr &vertex) {
-            _neighbours.push_back(vertex);
+        void FactorGraph::Edge::sendMessage(Vertex *source, const Message &message) {
+            _in_messages[source == _endpoints[0] ? 0 : 1] = message;
+        }
+
+        const FactorGraph::Edge::Message &FactorGraph::Edge::receiveMessage(Vertex *target) {
+            return _out_messages[target == _endpoints[0] ? 1 : 0];
+        }
+
+        void FactorGraph::Edge::resetMessages() {
+            _out_messages = _in_messages = { {{0.5, 0.5}, {0.5, 0.5}} };
+        }
+
+        bool FactorGraph::Edge::propagateMessages() {
+            auto converged = true;
+            for (auto i = 0; i < 2; ++i)
+                for (auto j = 0; j < 2; ++j) {
+                    auto ratio = _out_messages[i][j] / _in_messages[i][j];
+                    if (ratio < 0.99 || ratio > 1.01)
+                        converged = false;
+                }
+            _out_messages = _in_messages;
+            return converged;
+        }
+
+        FactorGraph::Vertex *FactorGraph::Edge::otherEndpoint(const Vertex *vertex) const {
+            return (vertex == _endpoints[0] ? _endpoints[1] : _endpoints[0]);
+        }
+
+        void FactorGraph::Edge::connectToEndpoints() {
+            _endpoints[0]->addNeighbour(this);
+            _endpoints[1]->addNeighbour(this);
         }
 
         FactorGraph::Hypothesis::Hypothesis(Kind kind)
             : _kind(kind) {}
 
-        void FactorGraph::Hypothesis::probability(double probability) {
-            _probability = probability;
-        }
-
         double FactorGraph::Hypothesis::probability() const {
             return _probability;
         }
 
-        FactorGraph::TypeHypothesisPtr FactorGraph::Hypothesis::castToTypeHypothesis() {
-            return TypeHypothesisPtr();
+        FactorGraph::TypeHypothesis *FactorGraph::Hypothesis::castToTypeHypothesis() {
+            return nullptr;
         }
 
-        FactorGraph::TypeHypothesisConstPtr FactorGraph::Hypothesis::castToTypeHypothesis() const {
-            return TypeHypothesisPtr();
+        const FactorGraph::TypeHypothesis *FactorGraph::Hypothesis::castToTypeHypothesis() const {
+            return nullptr;
         }
 
-        FactorGraph::ObservationPtr FactorGraph::Hypothesis::castToObservation() {
-            return ObservationPtr();
+        FactorGraph::Observation *FactorGraph::Hypothesis::castToObservation() {
+            return nullptr;
         }
 
-        FactorGraph::ObservationConstPtr FactorGraph::Hypothesis::castToObservation() const {
-            return ObservationPtr();
+        const FactorGraph::Observation *FactorGraph::Hypothesis::castToObservation() const {
+            return nullptr;
         }
 
         FactorGraph::Hypothesis::Kind FactorGraph::Hypothesis::kind() const {
             return _kind;
+        }
+
+        void FactorGraph::Hypothesis::sendMessages() {
+            for (auto edge : neighbours()) {
+                Edge::Message prod = { 1, 1 };
+                for (auto factor : neighbours())
+                    if (factor != edge) {
+                        auto msg = factor->receiveMessage(this);
+                        prod[0] *= msg[0];
+                        prod[1] *= msg[1];
+                    }
+                auto total = prod[0] + prod[1];
+                prod[0] /= total;
+                prod[1] /= total;
+                edge->sendMessage(this, prod);
+            }
+        }
+
+        void FactorGraph::Hypothesis::computeProbability() {
+            Edge::Message prod = { 1, 1 };
+            for (auto edge : neighbours()) {
+                auto msg = edge->receiveMessage(this);
+                prod[0] *= msg[0];
+                prod[1] *= msg[1];
+            }
+            _probability = prod[1] / (prod[0] + prod[1]);
         }
 
         bool FactorGraph::Hypothesis::operator==(const FactorGraph::Hypothesis &other) {
@@ -75,12 +142,12 @@ namespace refinery {
             return _type;
         }
 
-        FactorGraph::TypeHypothesisPtr FactorGraph::TypeHypothesis::castToTypeHypothesis() {
-            return shared_from_this();
+        FactorGraph::TypeHypothesis *FactorGraph::TypeHypothesis::castToTypeHypothesis() {
+            return this;
         }
 
-        FactorGraph::TypeHypothesisConstPtr FactorGraph::TypeHypothesis::castToTypeHypothesis() const {
-            return shared_from_this();
+        const FactorGraph::TypeHypothesis *FactorGraph::TypeHypothesis::castToTypeHypothesis() const {
+            return this;
         }
 
         FactorGraph::DeclaredTypeHypothesis::DeclaredTypeHypothesis(
@@ -91,91 +158,89 @@ namespace refinery {
             const AddressRange &range, TypeId type)
             : TypeHypothesis(Kind::ContentTypeHypothesis, range, type) {}
 
-        FactorGraph::ObservationPtr FactorGraph::Observation::castToObservation() {
-            return shared_from_this();
+        FactorGraph::Observation *FactorGraph::Observation::castToObservation() {
+            return this;
         }
 
-        FactorGraph::ObservationConstPtr FactorGraph::Observation::castToObservation() const {
-            return shared_from_this();
+        const FactorGraph::Observation *FactorGraph::Observation::castToObservation() const {
+            return this;
         }
 
-        WeightDistribution::WeightDistribution(std::vector<double> &&weights)
-            : _weights(std::move(weights)) {}
+        FactorGraph::Factor::Factor(Weights &&weights, Kind kind)
+            : _weights(std::move(weights)), _kind(kind) {}
 
-        WeightDistribution::WeightDistribution(const std::vector<double> &weights)
-            : _weights(weights) {}
-
-        double WeightDistribution::weight(const std::vector<bool> &truth_assignment) const {
-            auto delta = 1U;
-            auto index = 0U;
-            for (auto value : truth_assignment) {
-                if (value)
-                    index += delta;
-                delta <<= 1;
-            }
-            return _weights[index];
-        }
-
-        FactorGraph::Factor::Factor(Vertices &&neighbours, WeightDistribution &&weights,
-            Kind kind)
-            : Vertex(std::move(neighbours)), _weights(std::move(weights)), _kind(kind) {
-            for (auto vertex : neighbours)
-                vertex->addNeighbour(shared_from_this());
-        }
-
-        FactorGraph::Factor::Factor(const Vertices &neighbours, const WeightDistribution &weights,
-            Kind kind)
-            : Vertex(neighbours), _weights(weights), _kind(kind) {
-            for (auto vertex : neighbours)
-                vertex->addNeighbour(shared_from_this());
-        }
+        FactorGraph::Factor::Factor(const Weights &weights, Kind kind)
+            : _weights(weights), _kind(kind) {}
 
         FactorGraph::Factor::Kind FactorGraph::Factor::kind() const {
             return _kind;
         }
 
         bool FactorGraph::Factor::operator==(const Factor &other) {
-            return (_kind == other._kind && _neighbours == other._neighbours);
+            if (_kind != other._kind)
+                return false;
+            for (auto x = neighbours().begin(), y = other.neighbours().begin(),
+                xend = neighbours().end(), yend = other.neighbours().end();
+                x != xend || y != yend; ++x, ++y) {
+                if (x == xend || y == yend)
+                    return false;
+                if ((*x)->otherEndpoint(this) != (*y)->otherEndpoint(&other))
+                    return false;
+            }
+            return true;
         }
 
-        FactorGraph::DecompositionFactor::DecompositionFactor(
-            Vertices &&neighbours,
-            WeightDistribution &&weights)
-            : Factor(std::move(neighbours), std::move(weights), Kind::DecompositionFactor) {}
+        FactorGraph::Edge::Message FactorGraph::Factor::summarizeMessages(unsigned int index) {
+            auto this_bit   = 1U << index;
+            auto upper_bits = std::numeric_limits<unsigned int>::max() << index;
+            auto lower_bits = std::numeric_limits<unsigned int>::max() - upper_bits;
+            Edge::Message msg;
+            for (auto i = 0; i < 2; ++i) {
+                auto this_bit_value = i * this_bit;
+                msg[i] = 0;
+                for (auto j = 0U, count = _weights.size() / 2; j < count; ++j) {
+                    auto k = (j & upper_bits << 1) + this_bit_value + (j & lower_bits);
+                    auto point_weight = _weights[k];
+                    for (auto not_i = 0U, bit = 1U, degree = neighbours().size(); not_i < degree; ++not_i, bit <<= 1)
+                        if (not_i != index) {
+                            auto val = (k & bit ? 1 : 0);
+                            point_weight *= neighbours()[not_i]->receiveMessage(this)[val];
+                        }
+                    msg[i] += point_weight;
+                }
+            }
+            return msg;
+        }
 
-        FactorGraph::DecompositionFactor::DecompositionFactor(
-            const Vertices &neighbours,
-            const WeightDistribution &weights)
-            : Factor(neighbours, weights, Kind::DecompositionFactor) {}
+        void FactorGraph::Factor::sendMessages() {
+            for (auto i = 0U, degree = neighbours().size(); i < degree; ++i)
+                neighbours()[i]->sendMessage(this, summarizeMessages(i));
+        }
 
-        FactorGraph::PointerFactor::PointerFactor(
-            Vertices &&neighbours,
-            WeightDistribution &&weights)
-            : Factor(std::move(neighbours), std::move(weights), Kind::PointerFactor) {}
+        void FactorGraph::Factor::computeProbability() {}
 
-        FactorGraph::PointerFactor::PointerFactor(
-            const Vertices &neighbours,
-            const WeightDistribution &weights)
-            : Factor(neighbours, weights, Kind::PointerFactor) {}
+        FactorGraph::DecompositionFactor::DecompositionFactor(Weights &&weights)
+            : Factor(std::move(weights), Kind::DecompositionFactor) {}
 
-        FactorGraph::ContentFactor::ContentFactor(
-            Vertices &&neighbours,
-            WeightDistribution &&weights)
-            : Factor(std::move(neighbours), std::move(weights), Kind::ContentFactor) {}
+        FactorGraph::DecompositionFactor::DecompositionFactor(const Weights &weights)
+            : Factor(weights, Kind::DecompositionFactor) {}
 
-        FactorGraph::ContentFactor::ContentFactor(
-            const Vertices &neighbours,
-            const WeightDistribution &weights)
-            : Factor(neighbours, weights, Kind::ContentFactor) {}
+        FactorGraph::PointerFactor::PointerFactor(Weights &&weights)
+            : Factor(std::move(weights), Kind::PointerFactor) {}
 
-        FactorGraph::DeclarationContentFactor::DeclarationContentFactor(
-            Vertices &&neighbours,
-            WeightDistribution &&weights)
-            : Factor(std::move(neighbours), std::move(weights), Kind::ContentFactor) {}
+        FactorGraph::PointerFactor::PointerFactor(const Weights &weights)
+            : Factor(weights, Kind::PointerFactor) {}
 
-        FactorGraph::DeclarationContentFactor::DeclarationContentFactor(
-            const Vertices &neighbours,
-            const WeightDistribution &weights)
-            : Factor(neighbours, weights, Kind::ContentFactor) {}
+        FactorGraph::ContentFactor::ContentFactor(Weights &&weights)
+            : Factor(std::move(weights), Kind::ContentFactor) {}
+
+        FactorGraph::ContentFactor::ContentFactor(const Weights &weights)
+            : Factor(weights, Kind::ContentFactor) {}
+
+        FactorGraph::DeclarationContentFactor::DeclarationContentFactor(Weights &&weights)
+            : Factor(std::move(weights), Kind::ContentFactor) {}
+
+        FactorGraph::DeclarationContentFactor::DeclarationContentFactor(const Weights &weights)
+            : Factor(weights, Kind::ContentFactor) {}
     }
 }

@@ -25,7 +25,7 @@ namespace refinery {
         size_t FactorHash::operator()(const FactorGraph::FactorPtr &factor) const {
             size_t hash = 17;
             for (auto hypothesis : factor->neighbours())
-                hash = hash * 31 + ptrHash(hypothesis.get());
+                hash = hash * 31 + ptrHash(hypothesis->otherEndpoint(factor.get()));
             return hash;
         }
 
@@ -48,11 +48,18 @@ namespace refinery {
             return result.second;
         }
 
-        bool FactorGraphBuilder::addFactor(FactorGraph::FactorPtr *factor) {
+        bool FactorGraphBuilder::addFactor(FactorGraph::FactorPtr *factor,
+            const FactorGraph::VertexPtrs &neighbours) {
             auto result = _factors.insert(*factor);
             *factor = *result.first;
-            if (result.second)
+            if (result.second) {
                 _graph->addVertex(*factor);
+                for (auto neighbour : neighbours) {
+                    auto edge = std::make_shared<FactorGraph::Edge>(factor->get(),
+                        neighbour.get());
+                    _graph->addEdge(edge);
+                }
+            }
             return result.second;
         }
 

@@ -32,17 +32,20 @@ namespace refinery {
                         if (array_hypothesis_pair.declared_type && elem_hypothesis_pair.declared_type) {
                             FactorGraph::FactorPtr declared_type_factor =
                                 std::make_shared<FactorGraph::DecompositionFactor>(
-                                    FactorGraph::Vertices({ array_hypothesis_pair.declared_type,
-                                        elem_hypothesis_pair.declared_type }),
-                                    WeightDistribution({ 0, 0, 0, 0 }));
-                            builder.addFactor(&declared_type_factor);
+                                    FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
+                            builder.addFactor(&declared_type_factor, {
+                                array_hypothesis_pair.declared_type,
+                                elem_hypothesis_pair.declared_type
+                            });
                         }
                         if (array_hypothesis_pair.content_type && elem_hypothesis_pair.content_type) {
                             FactorGraph::FactorPtr content_type_factor =
                                 std::make_shared<FactorGraph::DecompositionFactor>(
-                                    FactorGraph::Vertices({ array_hypothesis_pair.content_type,
-                                        elem_hypothesis_pair.content_type }),
-                                    WeightDistribution({ 0, 0, 0, 0 }));
+                                    FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
+                            builder.addFactor(&content_type_factor, {
+                                array_hypothesis_pair.content_type,
+                                elem_hypothesis_pair.content_type
+                            });
                         }
                     }
                     else {
@@ -75,17 +78,20 @@ namespace refinery {
                             if (udt_hypothesis_pair.declared_type && field_hypothesis_pair.declared_type) {
                                 FactorGraph::FactorPtr declared_type_factor =
                                     std::make_shared<FactorGraph::DecompositionFactor>(
-                                        FactorGraph::Vertices({ udt_hypothesis_pair.declared_type,
-                                            field_hypothesis_pair.declared_type }),
-                                        WeightDistribution({ 0, 0, 0, 0 }));
-                                builder.addFactor(&declared_type_factor);
+                                        FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
+                                builder.addFactor(&declared_type_factor, {
+                                    udt_hypothesis_pair.declared_type,
+                                    field_hypothesis_pair.declared_type
+                                });
                             }
                             if (udt_hypothesis_pair.content_type && field_hypothesis_pair.content_type) {
                                 FactorGraph::FactorPtr content_type_factor =
                                     std::make_shared<FactorGraph::DecompositionFactor>(
-                                        FactorGraph::Vertices({ udt_hypothesis_pair.content_type,
-                                            field_hypothesis_pair.content_type }),
-                                        WeightDistribution({ 0, 0, 0, 0 }));
+                                        FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
+                                builder.addFactor(&content_type_factor, {
+                                    udt_hypothesis_pair.content_type,
+                                    field_hypothesis_pair.content_type
+                                });
                             }
                         }
                         else {
@@ -112,11 +118,12 @@ namespace refinery {
                 auto target_hypothesis_pair = destructureBlockIfNew(builder, referenced_data);
                 FactorGraph::FactorPtr pointer_factor =
                     std::make_shared<FactorGraph::PointerFactor>(
-                        FactorGraph::Vertices({ ptr_hypothesis_pair.declared_type,
-                            ptr_hypothesis_pair.content_type,
-                            target_hypothesis_pair.declared_type }),
-                        WeightDistribution({ 0, 0, 0, 0, 0, 0, 0, 0 }));
-                builder.addFactor(&pointer_factor);
+                        FactorGraph::Factor::Weights({ 0, 0, 0, 0, 0, 0, 0, 0 }));
+                builder.addFactor(&pointer_factor, {
+                    ptr_hypothesis_pair.declared_type,
+                    ptr_hypothesis_pair.content_type,
+                    target_hypothesis_pair.declared_type
+                });
             }
             else {
                 // TODO(nzeh): For now, we're just ignoring failure here.
@@ -140,10 +147,13 @@ namespace refinery {
                     hypothesis_pair.content_type =
                         std::make_shared<FactorGraph::ContentTypeHypothesis>(range, type);
                     builder.addHypothesis(&hypothesis_pair.content_type);
-                    auto link_hypotheses =
+                    FactorGraph::FactorPtr link_hypotheses =
                         std::make_shared<FactorGraph::DeclarationContentFactor>(
-                            FactorGraph::Vertices({ hypothesis_pair.declared_type, hypothesis_pair.content_type }),
-                            WeightDistribution({ 0, 0, 0, 0 }));
+                            FactorGraph::Factor::Weights({ 0, 0, 0, 0 }));
+                    builder.addFactor(&link_hypotheses, {
+                        hypothesis_pair.declared_type,
+                        hypothesis_pair.content_type
+                    });
                 }
                 if (data.IsArrayType())
                     destructureArrayBlock(builder, data, hypothesis_pair);

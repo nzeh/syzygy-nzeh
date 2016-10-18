@@ -6,7 +6,7 @@
 namespace refinery {
     namespace ProbMemAnalysis {
 
-        void inferProbabilities(FactorGraphPtr);
+        void inferProbabilities(const FactorGraphPtr &);
     }
 }
 
